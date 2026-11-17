@@ -24,19 +24,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Ensure Android SDK 35 (use preinstalled SDK, full path)
+      - name: Ensure Android SDK 35
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "platforms:"; ls "$ANDROID_HOME/platforms" || true
-          echo "build-tools:"; ls "$ANDROID_HOME/build-tools" || true
           SDKM="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort | tail -1)"
-          echo "sdkmanager=$SDKM"
           if [ -n "$SDKM" ]; then yes | "$SDKM" --licenses >/dev/null 2>&1 || true; fi
           if [ ! -d "$ANDROID_HOME/platforms/android-35" ]; then "$SDKM" "platforms;android-35"; fi
           if [ ! -d "$ANDROID_HOME/build-tools/35.0.0" ]; then "$SDKM" "build-tools;35.0.0"; fi
-          test -d "$ANDROID_HOME/platforms/android-35"
 
       - name: Configure a single minified mini build (CI workspace only)
         working-directory: src
@@ -59,14 +53,26 @@ jobs:
               "-keep class com.mahfazty.smart.domain.model.** { *; }\n"
               "-dontwarn kotlinx.coroutines.**\n"
           )
-          print("mini build configured")
           PY
 
       - name: Build ONLY the mini APK
         working-directory: src
+        shell: bash
         run: |
+          set -eo pipefail
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace -x lint
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace -x lint 2>&1 | tee build.log
+
+      - name: Upload build log on failure
+        if: failure()
+        working-directory: photos
+        run: |
+          tail -n 250 ../src/build.log > _build_log.txt 2>/dev/null || echo "no build.log" > _build_log.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add _build_log.txt
+          git commit -m "CI: سجل البناء للتشخيص"
+          git push
 
       - name: Collect APK
         run: |
