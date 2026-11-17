@@ -1,0 +1,77 @@
+name: Build Mini APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mini:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone app source (app_ma)
+        run: git clone --depth 1 https://github.com/SagedAMV/app_ma.git src
+
+      - name: Checkout Photos (target repo)
+        uses: actions/checkout@v4
+        with:
+          path: photos
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Configure a single minified mini build (CI workspace only)
+        working-directory: src
+        run: |
+          python3 - <<'PY'
+          p = 'app/build.gradle.kts'
+          s = open(p, encoding='utf-8').read()
+          bt = (
+              "        debug {\n"
+              "            isMinifyEnabled = true\n"
+              "            isShrinkResources = true\n"
+              "            proguardFiles(getDefaultProguardFile(\"proguard-android-optimize.txt\"), \"proguard-rules.pro\")\n"
+              "        }\n"
+          )
+          s = s.replace("    buildTypes {\n", "    buildTypes {\n" + bt, 1)
+          open(p, 'w', encoding='utf-8').write(s)
+          open('app/proguard-rules.pro', 'a', encoding='utf-8').write(
+              "\n-keep class org.json.** { *; }\n"
+              "-keep class com.mahfazty.smart.data.db.** { *; }\n"
+              "-keep class com.mahfazty.smart.domain.model.** { *; }\n"
+              "-dontwarn kotlinx.coroutines.**\n"
+          )
+          print("mini build configured")
+          PY
+
+      - name: Build ONLY the mini APK
+        working-directory: src
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace -x lint
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp src/app/build/outputs/apk/debug/app-debug.apk out/mahfazty-mini.apk
+          ls -lh out
+
+      - name: Commit mini APK to Photos
+        working-directory: photos
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp ../out/mahfazty-mini.apk "محفظتي-الذكية-مصغرة.apk"
+          git add "محفظتي-الذكية-مصغرة.apk"
+          git commit -m "بناء نسخة مصغرة (minified) من app_ma عبر CI"
+          git push
