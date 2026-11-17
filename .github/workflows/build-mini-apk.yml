@@ -13,11 +13,6 @@ jobs:
       - name: Clone app source (app_ma)
         run: git clone --depth 1 https://github.com/SagedAMV/app_ma.git src
 
-      - name: Checkout Photos (target repo)
-        uses: actions/checkout@v4
-        with:
-          path: photos
-
       - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
@@ -63,29 +58,38 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleDebug --no-daemon --stacktrace -x lint 2>&1 | tee build.log
 
-      - name: Upload build log on failure
-        if: failure()
-        working-directory: photos
-        run: |
-          tail -n 250 ../src/build.log > _build_log.txt 2>/dev/null || echo "no build.log" > _build_log.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add _build_log.txt
-          git commit -m "CI: سجل البناء للتشخيص"
-          git push
-
       - name: Collect APK
         run: |
           mkdir -p out
           cp src/app/build/outputs/apk/debug/app-debug.apk out/mahfazty-mini.apk
           ls -lh out
 
-      - name: Commit mini APK to Photos
-        working-directory: photos
+      - name: Upload APK as artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mahfazty-mini-apk
+          path: out/mahfazty-mini.apk
+
+      - name: Upload mini APK to Photos via Git Data API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          cp ../out/mahfazty-mini.apk "محفظتي-الذكية-مصغرة.apk"
-          git add "محفظتي-الذكية-مصغرة.apk"
-          git commit -m "بناء نسخة مصغرة (minified) من app_ma عبر CI"
-          git push
+          python3 - <<'PY'
+          import os, json, base64, urllib.request, urllib.error
+          tok=os.environ['GH_TOKEN']; repo=os.environ['REPO']
+          api=f'https://api.github.com/repos/{repo}'
+          H={'Authorization':'Bearer '+tok,'Accept':'application/vnd.github+json','User-Agent':'ci','Content-Type':'application/json'}
+          def call(method,path,body=None):
+              req=urllib.request.Request(api+path,method=method,data=json.dumps(body).encode() if body else None,headers=H)
+              with urllib.request.urlopen(req,timeout=120) as r: return json.loads(r.read().decode())
+          data=open('out/mahfazty-mini.apk','rb').read()
+          print('APK bytes:', len(data))
+          blob=call('POST','/git/blobs',{'content':base64.b64encode(data).decode(),'encoding':'base64'})
+          parent=call('GET','/git/ref/heads/main')['object']['sha']
+          base=call('GET',f'/git/commits/{parent}')
+          tree=call('POST','/git/trees',{'base_tree':base['tree']['sha'],'tree':[{'path':'محفظتي-الذكية-مصغرة.apk','mode':'100644','type':'blob','sha':blob['sha']}]})
+          new=call('POST','/git/commits',{'message':'بناء نسخة مصغرة (minified) من app_ma عبر CI','tree':tree['sha'],'parents':[parent]})
+          call('PATCH','/git/refs/heads/main',{'sha':new['sha']})
+          print('UPLOADED commit', new['sha'])
+          PY
