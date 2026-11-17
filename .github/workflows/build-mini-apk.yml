@@ -24,11 +24,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - name: Accept licenses & ensure Android SDK 35 (preinstalled on runner)
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: Configure a single minified mini build (CI workspace only)
         working-directory: src
